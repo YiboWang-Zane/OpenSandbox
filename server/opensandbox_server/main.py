@@ -74,6 +74,8 @@ from opensandbox_server.api.devops import router as devops_router  # noqa: E402
 from opensandbox_server.api.pool import router as pool_router  # noqa: E402
 from opensandbox_server.api.lifecycle import router, sandbox_service  # noqa: E402
 from opensandbox_server.api.proxy import router as proxy_router  # noqa: E402
+from opensandbox_server.api.sar import router as sar_router  # noqa: E402
+from opensandbox_server.api.sar import init_sar_gateway  # noqa: E402
 from opensandbox_server.integrations.renew_intent.proxy_renew import ProxyRenewCoordinator  # noqa: E402
 from opensandbox_server.middleware.auth import AuthMiddleware  # noqa: E402
 from opensandbox_server.middleware.request_id import RequestIdMiddleware  # noqa: E402
@@ -129,6 +131,27 @@ async def lifespan(app: FastAPI):
         app.state.renew_intent_consumer,
     )
 
+    # Initialize SAR gateway if enabled
+    sar_cfg = app_config.sar
+    if sar_cfg is not None and sar_cfg.enabled:
+        from opensandbox_server.sar.gateway import GatewayConfig
+        gw_config = GatewayConfig(
+            enabled=True,
+            signing_key=sar_cfg.signing_key,
+            max_capability_ttl_seconds=sar_cfg.max_capability_ttl_seconds,
+            default_judge_ttl_seconds=sar_cfg.default_judge_ttl_seconds,
+            max_approved_files=sar_cfg.max_approved_files,
+            escalation_mode=sar_cfg.escalation_mode,
+            extra_sensitive_patterns=sar_cfg.extra_sensitive_patterns,
+            base_image=sar_cfg.base_image,
+            read_only_rootfs=sar_cfg.read_only_rootfs,
+            max_concurrent_runtimes=sar_cfg.max_concurrent_runtimes,
+        )
+        app.state.sar_gateway = init_sar_gateway(gw_config)
+        logger.info("SAR gateway enabled and initialized")
+    else:
+        logger.info("SAR gateway is disabled")
+
     yield
 
     consumer = getattr(app.state, "renew_intent_consumer", None)
@@ -172,10 +195,12 @@ app.include_router(router)
 app.include_router(devops_router)
 app.include_router(pool_router)
 app.include_router(proxy_router)
+app.include_router(sar_router)
 app.include_router(router, prefix="/v1")
 app.include_router(devops_router, prefix="/v1")
 app.include_router(pool_router, prefix="/v1")
 app.include_router(proxy_router, prefix="/v1")
+app.include_router(sar_router, prefix="/v1")
 
 DEFAULT_ERROR_CODE = "GENERAL::UNKNOWN_ERROR"
 DEFAULT_ERROR_MESSAGE = "An unexpected error occurred."

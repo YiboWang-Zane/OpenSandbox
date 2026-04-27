@@ -555,6 +555,93 @@ class DockerConfig(BaseModel):
     )
 
 
+class SARConfig(BaseModel):
+    """
+    Secure Agentic Runtime (SAR) configuration.
+
+    When enabled, the SAR gateway intercepts every LLM-generated tool call,
+    validates intent via a judge layer, mints scoped capability tokens,
+    and runs commands in ephemeral isolated runtimes.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Master switch for the SAR gateway. When false, the SAR pipeline is inactive.",
+    )
+    signing_key: Optional[str] = Field(
+        default=None,
+        description="HMAC signing key for capability tokens. Auto-generated if omitted.",
+    )
+    max_capability_ttl_seconds: int = Field(
+        default=3600,
+        ge=10,
+        le=86400,
+        description="Maximum TTL for capability tokens in seconds.",
+    )
+    default_judge_ttl_seconds: int = Field(
+        default=60,
+        ge=5,
+        le=3600,
+        description="Default TTL the judge grants for tool executions.",
+    )
+    max_approved_files: int = Field(
+        default=50,
+        ge=1,
+        le=1000,
+        description="Maximum number of files the judge will approve per tool call.",
+    )
+    escalation_mode: str = Field(
+        default="deny",
+        description="How to handle judge escalations: 'deny' (auto-deny) or 'human_review'.",
+    )
+    extra_sensitive_patterns: list[str] = Field(
+        default_factory=list,
+        description="Additional glob patterns for paths that should always be blocked.",
+    )
+    base_image: str = Field(
+        default="python:3.12-slim",
+        description="Base container image for ephemeral runtimes.",
+        min_length=1,
+    )
+    read_only_rootfs: bool = Field(
+        default=True,
+        description="Mount the root filesystem as read-only in ephemeral runtimes.",
+    )
+    max_concurrent_runtimes: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum number of concurrent ephemeral runtimes.",
+    )
+    ephemeral_memory_limit_mb: int = Field(
+        default=256,
+        ge=32,
+        le=8192,
+        description="Memory limit in MB for each ephemeral runtime.",
+    )
+    ephemeral_cpu_quota: float = Field(
+        default=0.5,
+        ge=0.1,
+        le=4.0,
+        description="CPU quota (in cores) for each ephemeral runtime.",
+    )
+    ephemeral_pids_limit: int = Field(
+        default=64,
+        ge=8,
+        le=4096,
+        description="Maximum processes per ephemeral runtime.",
+    )
+
+    @model_validator(mode="after")
+    def validate_escalation_mode(self) -> "SARConfig":
+        if self.escalation_mode not in ("deny", "human_review"):
+            raise ValueError(
+                f"sar.escalation_mode must be 'deny' or 'human_review', "
+                f"got '{self.escalation_mode}'."
+            )
+        return self
+
+
 class AppConfig(BaseModel):
     """Root application configuration model."""
 
@@ -573,6 +660,14 @@ class AppConfig(BaseModel):
     secure_runtime: Optional[SecureRuntimeConfig] = Field(
         default=None,
         description="Secure container runtime configuration (gVisor, Kata, Firecracker).",
+    )
+    sar: Optional["SARConfig"] = Field(
+        default=None,
+        description=(
+            "Secure Agentic Runtime (SAR) configuration. When enabled, every LLM-generated "
+            "tool call is treated as an untrusted request and routed through a security gateway "
+            "with judge validation, capability minting, and ephemeral execution."
+        ),
     )
 
     @model_validator(mode="after")
